@@ -659,7 +659,10 @@ const App = {
          };
 
          // 2. School Info
-         setVal('setting-school-name-kr', data.school_name || '');
+         // Prioritize full_name_kr if column exists (even if null), otherwise fallback to school_name (legacy)
+         const koName = (data.full_name_kr !== undefined) ? data.full_name_kr : data.school_name;
+         setVal('setting-school-name-kr', koName || '');
+         
          setVal('setting-school-name-en', data.name_en || '');
          setVal('setting-school-level-kr', data.level_kr || '');
          setVal('setting-school-level-en', data.level_en || '');
