@@ -608,6 +608,12 @@ const App = {
              });
         }
         
+        // 4. Dept Import Trigger
+        const btnImportTrigger = document.getElementById('btn-import-depts-trigger');
+        if(btnImportTrigger) {
+            btnImportTrigger.onclick = () => this.openDeptImportModal();
+        }
+        
         // --- Shared Date Logic (Holiday Aware) ---
         // Moved to App methods (this.parseLocal, etc.)
 
@@ -851,7 +857,7 @@ const App = {
 
                  const div = document.createElement('div');
                  div.className = "flex items-center gap-2 mb-2 special-dept-row";
-                 div.dataset.id = s.id;
+                 if (savedRow) div.dataset.id = savedRow.id;
                  div.dataset.name = s.name;
                  
                  div.innerHTML = `
@@ -967,7 +973,21 @@ const App = {
          // Refine Holidays Loading
          // 1. Calculate Standard Fixed
          const standardFixed = this.calculateMergedHolidays(targetY);
-         this.currentFixedHolidays = standardFixed; // Always use standard calc for display consistency
+         if (schedules.length > 0) {
+             const dbFilteredFixed = {};
+             Object.entries(standardFixed).forEach(([date, name]) => {
+                 const names = name.split(", ");
+                 const confirmedNames = names.filter(n => 
+                     schedules.some(r => r.type === 'holiday' && r.start_date === date && r.name === n)
+                 );
+                 if (confirmedNames.length > 0) {
+                     dbFilteredFixed[date] = confirmedNames.join(", ");
+                 }
+             });
+             this.currentFixedHolidays = dbFilteredFixed;
+         } else {
+             this.currentFixedHolidays = standardFixed;
+         }
          this.renderFixedHolidays(this.currentFixedHolidays);
 
          // 2. Identify Variables (In DB but not in Standard)
@@ -1235,7 +1255,7 @@ const App = {
             
             if (dateInput && nameInput) {
                 newList.push({ 
-                    id: div.dataset.id || null, // Capture ID
+                    id: div.dataset.id || undefined, // Use undefined for omission
                     date: dateInput.value, 
                     name: nameInput.value,
                     isEditing: true
@@ -1376,7 +1396,7 @@ const App = {
             
             if (nameInput && startInput) {
                 newList.push({ 
-                    id: div.dataset.id || null, // Capture ID
+                    id: div.dataset.id || undefined, // Use undefined for omission
                     start: startInput.value,
                     end: (endInput && endInput.value) ? endInput.value : '', 
                     name: nameInput.value,
@@ -1493,6 +1513,9 @@ const App = {
             // Collect Data
             const yearVal = document.getElementById('setting-academic-year').value;
             const academicYear = parseInt(yearVal);
+            if (isNaN(academicYear)) {
+                throw new Error('올바른 학년도를 선택해 주세요.');
+            }
             
             const getVal = (id) => {
                 const val = document.getElementById(id)?.value;
@@ -1594,6 +1617,11 @@ const App = {
             };
 
             if(existing) settingsPayload.id = existing.id;
+            
+            // Safety: Ensure id is not null/undefined/string "null"
+            if (!settingsPayload.id || settingsPayload.id === 'null' || settingsPayload.id === 'undefined') {
+                delete settingsPayload.id;
+            }
 
             const { error: settingsError } = await window.SupabaseClient.supabase
                 .from('settings')
@@ -1602,23 +1630,26 @@ const App = {
             if(settingsError) throw settingsError;
 
             // --- Basic Schedules Migration ---
-            // Flatten all data to rows
-            const basicRows = [];
             
-            // Helper to get existing ID if it was loaded or belongs to a system code
+            // 1. Get ALL records for this year in DB FIRST for robust ID matching
+            const { data: dbBasics } = await window.SupabaseClient.supabase
+                .from('basic_schedules')
+                .select('*')
+                .eq('academic_year', academicYear);
+            
+            const dbBasicsList = dbBasics || [];
+
+            // Helper to match existing records
             const findExistingId = (type, code, name, start) => {
-                // For dynamic lists, we use the ID stored in the object
-                if (type === 'holiday' && this.currentVariableHolidays) {
-                    const found = this.currentVariableHolidays.find(h => h.name === name && h.date === start);
-                    if (found && found.id) return found.id;
+                if (code) {
+                    const found = dbBasicsList.find(r => r.code === code);
+                    if (found) return found.id;
                 }
-                if (type === 'event' && !code && this.currentMajorEvents) {
-                    const found = this.currentMajorEvents.find(h => h.name === name && h.start === start);
-                    if (found && found.id) return found.id;
-                }
-                return null;
+                const found = dbBasicsList.find(r => r.type === type && r.name === name && r.start_date === start);
+                return found ? found.id : undefined;
             };
 
+            const basicRows = [];
             const addRow = (type, code, name, start, end = null, is_holiday = false) => {
                 if(!start) return;
                 const row = {
@@ -1631,10 +1662,13 @@ const App = {
                     is_holiday
                 };
                 const existingId = findExistingId(type, code, name, start);
-                if (existingId) row.id = existingId;
+                if (existingId && existingId !== 'null' && existingId !== 'undefined') {
+                    row.id = existingId;
+                }
                 basicRows.push(row);
             };
 
+            // A. Flatten all data to rows
             // 1. Terms & Vacations
             addRow('term', 'TERM1_START', '1학기 개학', getVal('sched-sem1-start'));
             addRow('vacation', 'SUMMER_VAC', '여름방학', getVal('sched-summer-start'), getVal('sched-summer-end'));
@@ -1664,54 +1698,53 @@ const App = {
             examDefinitions.forEach(def => {
                 const s = getVal(def.s);
                 const e = getVal(def.e);
-                if(s && e) {
-                    addRow('exam', def.code, def.title, s, e);
-                }
+                if(s && e) addRow('exam', def.code, def.title, s, e);
             });
 
             // 5. Major Events
             finalMajorEvents.forEach(ev => {
-                 if(ev.type !== 'exam') { // Exams already added above if they were in the list, but we separated logic.
-                     addRow('event', null, ev.name, ev.start, ev.end);
-                 }
+                 if(ev.type !== 'exam') addRow('event', null, ev.name, ev.start, ev.end);
             });
 
-            // Sync Basic Schedules (Upsert New/Existing -> Delete Removed)
-            // 1. Get ALL records for this year in DB
-            const { data: dbBasics } = await window.SupabaseClient.supabase
-                .from('basic_schedules')
-                .select('id, code')
-                .eq('academic_year', academicYear);
-            
-            const dbBasicIds = (dbBasics || []).map(r => r.id);
-            const basicCodeIds = (dbBasics || []).filter(r => r.code).reduce((acc, r) => {
-                acc[r.code] = r.id;
-                return acc;
-            }, {});
-
-            // Match IDs for system codes in the payload
-            basicRows.forEach(row => {
-                if (row.code && basicCodeIds[row.code]) {
-                    row.id = basicCodeIds[row.code];
-                }
-            });
-
-            // 2. Identify Deletions
+            // B. Identify Deletions
+            const dbBasicIds = dbBasicsList.map(r => r.id);
             const payloadBasicIds = basicRows.filter(r => r.id).map(r => r.id);
             const toDeleteBasics = dbBasicIds.filter(id => !payloadBasicIds.includes(id));
 
             if (toDeleteBasics.length > 0) {
-                await window.SupabaseClient.supabase
+                const { error: delErr } = await window.SupabaseClient.supabase
                     .from('basic_schedules')
                     .delete()
                     .in('id', toDeleteBasics);
+                if (delErr) throw delErr;
             }
 
-            if (basicRows.length > 0) {
-                const { error: insError } = await window.SupabaseClient.supabase
+            // C. Execute (Strict Separation to avoid NULL PK issues)
+            const toUpdateBasic = [];
+            const toInsertBasic = [];
+
+            basicRows.forEach(row => {
+                const clean = { ...row };
+                if (clean.id && clean.id !== 'null' && clean.id !== 'undefined') {
+                    toUpdateBasic.push(clean);
+                } else {
+                    delete clean.id; // Safety
+                    toInsertBasic.push(clean);
+                }
+            });
+
+            if (toUpdateBasic.length > 0) {
+                const { error: updErr } = await window.SupabaseClient.supabase
                     .from('basic_schedules')
-                    .upsert(basicRows);
-                if (insError) throw insError;
+                    .upsert(toUpdateBasic);
+                if (updErr) throw updErr;
+            }
+
+            if (toInsertBasic.length > 0) {
+                const { error: insErr } = await window.SupabaseClient.supabase
+                    .from('basic_schedules')
+                    .insert(toInsertBasic);
+                if (insErr) throw insErr;
             }
 
             // Sync Departments (Upsert New/Existing -> Delete Removed)
@@ -1741,8 +1774,8 @@ const App = {
             
             // 2. Special
             document.querySelectorAll('.special-dept-row').forEach((row, i) => {
-                const id = row.dataset.id;
-                const name = row.dataset.name;
+                const id = row.dataset.id; // DB UUID or empty
+                const name = row.dataset.name; // e.g. "행정실"
                 const nickname = row.querySelector('.special-dept-nickname').value;
                 const color = row.querySelector('.special-dept-color').value;
                 const active = row.querySelector('.special-dept-check').checked;
@@ -1771,11 +1804,21 @@ const App = {
             }
 
             if (deptPayload.length > 0) {
-                const { error: deptError } = await window.SupabaseClient.supabase
-                    .from('departments')
-                    .upsert(deptPayload);
-                
-                if (deptError) throw deptError;
+                const sanitizedDepts = deptPayload.map(d => {
+                    const clean = { ...d };
+                    if (!clean.id || clean.id === 'null' || clean.id === 'undefined') {
+                        delete clean.id;
+                    }
+                    return clean;
+                });
+
+                if (sanitizedDepts.length > 0) {
+                    const { error: deptError } = await window.SupabaseClient.supabase
+                        .from('departments')
+                        .upsert(sanitizedDepts);
+                    
+                    if (deptError) throw deptError;
+                }
             }
 
             // --- REPAIR LOGIC: Re-link orphaned schedules ---
@@ -1806,11 +1849,86 @@ const App = {
 
     },
 
-    repairOrphanedSchedules: async function(academicYear) {
-        // This function would ideally use a mapping of old IDs to names.
-        // Since we previously used destructive deletions, we lost that mapping.
-        // However, the current stable ID logic (Upsert) ensures this never happens again.
-        console.log("Department ID stability is now active. Future save operations will preserve schedule links.");
+    repairOrphanedSchedules: async function(currentAcademicYear) {
+        console.log('Running Schedule Repair...');
+        try {
+            // 1. Find Orphaned Schedules (dept_id IS NULL AND dept_name IS NOT NULL)
+            const { data: orphans, error } = await window.SupabaseClient.supabase
+                .from('schedules')
+                .select('id, dept_name, start_date')
+                .is('dept_id', null)
+                .neq('dept_name', null)
+                .neq('dept_name', ''); // Ensure valid name
+
+            if (error) throw error;
+            if (!orphans || orphans.length === 0) return;
+
+            console.log(`Found ${orphans.length} orphaned schedules. Attempting repair...`);
+
+            // 2. Group Orphans by Calculated Academic Year to minimize Dept queries
+            // Map: { "2025": [schedule, schedule...], "2026": [...] }
+            const groupedByYear = {};
+            
+            orphans.forEach(sch => {
+                if (!sch.start_date) return;
+                const d = new Date(sch.start_date);
+                const mm = d.getMonth() + 1;
+                const y = d.getFullYear();
+                // Academic Year Logic: Jan/Feb belongs to PREVIOUS year
+                const ay = (mm < 3) ? y - 1 : y;
+                
+                if (!groupedByYear[ay]) groupedByYear[ay] = [];
+                groupedByYear[ay].push(sch);
+            });
+
+            // 3. Process each Year Group
+            for (const ayStr of Object.keys(groupedByYear)) {
+                const ay = parseInt(ayStr);
+                const yearOrphans = groupedByYear[ay];
+
+                // Fetch Departments for this Academic Year
+                const { data: depts } = await window.SupabaseClient.supabase
+                    .from('departments')
+                    .select('id, dept_name')
+                    .eq('academic_year', ay);
+                
+                if (!depts || depts.length === 0) continue;
+
+                // Create Name -> ID Map for this year
+                const deptMap = {};
+                depts.forEach(d => {
+                    const normName = (d.dept_name || '').trim();
+                    deptMap[normName] = d.id;
+                });
+
+                // 4. Prepare Updates
+                const updates = [];
+                yearOrphans.forEach(sch => {
+                    const schName = (sch.dept_name || '').trim();
+                    const foundId = deptMap[schName];
+                    
+                    if (foundId) {
+                        // Restore ID
+                        updates.push({
+                            id: sch.id,
+                            dept_id: foundId
+                        });
+                    }
+                });
+
+                // 5. Execute Batch Update
+                if (updates.length > 0) {
+                    const { error: updErr } = await window.SupabaseClient.supabase
+                        .from('schedules')
+                        .upsert(updates); 
+                    
+                    if (updErr) console.error(`Repair failed for year ${ay}:`, updErr);
+                    else console.log(`Repaired ${updates.length} schedules for year ${ay}`);
+                }
+            }
+        } catch (e) {
+            console.error('Schedule Repair Error:', e);
+        }
     },
 
     updateBrand: function(schoolNameKR, schoolNameEN) {
@@ -2229,6 +2347,41 @@ const App = {
                     }
                 }
             });
+
+            // A-2. Standard Holiday Injection (Deduplicated)
+            // Ensures legal holidays (Samil-jeol, etc) are shown only if NOT in DB.
+            const ayCollection = new Set();
+            basicSchedules.forEach(item => { if (item.academic_year) ayCollection.add(parseInt(item.academic_year)); });
+            
+            // If we have NO data at all for a range (e.g. browsing future year), fallback to current
+            if (ayCollection.size === 0) ayCollection.add(this.state.currentYear || new Date().getFullYear());
+
+            ayCollection.forEach(ay => {
+                // IMPORTANT: If this year ALREADY has data in basicSchedules (from DB), 
+                // it means the user has "initialized" or "saved" this year.
+                // In this case, we respect the DB as the source of truth and skip auto-injection.
+                const hasDbData = basicSchedules.some(item => parseInt(item.academic_year) === ay);
+                if (hasDbData) return;
+
+                const holidays = this.calculateMergedHolidays(ay);
+                Object.entries(holidays).forEach(([dateStr, name]) => {
+                    const names = name.split(", ");
+                    names.forEach(n => {
+                        if (adminEventMap[dateStr] && adminEventMap[dateStr].has(normalize(n))) return;
+                        
+                        addAdminRef(dateStr, n);
+                        events.push({
+                            start: dateStr,
+                            display: 'background',
+                            title: '',
+                            className: 'holiday-bg-event',
+                            backgroundColor: 'transparent',
+                            allDay: true,
+                            extendedProps: { label: n }
+                        });
+                    });
+                });
+            });
             
             // A-3. Env Events (Fixed from App Constant)
             // These are NOT in DB currently, still calculated manually or should we move to DB?
@@ -2268,6 +2421,9 @@ const App = {
                 const hasConflict = adminEventMap[s.start_date] && adminEventMap[s.start_date].has(normTitle);
                 
                 if (hasConflict) return; 
+
+                // GUEST VISIBILITY CHECK: Only show 'public'
+                if (!this.state.user && s.visibility !== 'public') return;
 
                 const dept = deptMap[s.dept_id] || {};
                 events.push({
@@ -2479,9 +2635,13 @@ const App = {
             e.preventDefault();
 
             const scheduleId = document.getElementById('schedule-id').value;
+            const selectedDeptOption = deptSelect.options[deptSelect.selectedIndex];
+            const deptName = selectedDeptOption ? selectedDeptOption.text : '';
+
             const baseData = {
                 title: titleInput.value,
                 dept_id: deptSelect.value,
+                dept_name: deptName, // Store name for recovery
                 visibility: visSelect.value,
                 description: descInput.value,
                 is_printable: printCheck.checked,
@@ -2907,6 +3067,7 @@ const App = {
                             end_date: end || start,
                             description: desc || '',
                             dept_id: finalDept.id,
+                            dept_name: deptName, // Store raw name for recovery
                             visibility,
                             author_id: this.state.user.id,
                             is_printable: true,
@@ -3130,6 +3291,166 @@ const App = {
                 btnUpload.textContent = '업로드';
             }
         };
+    },
+
+    openDeptImportModal: async function() {
+        const modalContainer = document.getElementById('modal-container');
+        try {
+            if (!this.state.templates['dept-import']) {
+                const response = await fetch('pages/modal-dept-import.html');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                this.state.templates['dept-import'] = await response.text();
+            }
+            modalContainer.innerHTML = this.state.templates['dept-import'];
+            modalContainer.classList.remove('invisible');
+        } catch (e) {
+             console.error("Failed to load dept import modal", e);
+             alert('모달을 불러올 수 없습니다. (' + e.message + ')');
+             return;
+        }
+
+        const btnClose = document.getElementById('btn-dept-import-close');
+        const btnCancel = document.getElementById('btn-dept-import-cancel');
+        const btnSubmit = document.getElementById('btn-dept-import-submit');
+        const fromYearSelect = document.getElementById('import-from-year');
+        const toYearSelect = document.getElementById('import-to-year');
+        const statusArea = document.getElementById('import-status');
+
+        const closeModal = () => {
+             modalContainer.innerHTML = '';
+             modalContainer.classList.add('invisible');
+        };
+        if(btnClose) btnClose.onclick = closeModal;
+        if(btnCancel) btnCancel.onclick = closeModal;
+
+        // Populate Years
+        const currentYear = new Date().getFullYear();
+        for(let y = currentYear - 5; y <= currentYear + 5; y++) {
+             const optF = document.createElement('option');
+             optF.value = y;
+             optF.textContent = `${y}학년도`;
+             if(y === currentYear - 1) optF.selected = true;
+             fromYearSelect.appendChild(optF);
+
+             const optT = document.createElement('option');
+             optT.value = y;
+             optT.textContent = `${y}학년도`;
+             if(y === currentYear) optT.selected = true;
+             toYearSelect.appendChild(optT);
+        }
+
+        if(btnSubmit) {
+            btnSubmit.onclick = async () => {
+                const fy = parseInt(fromYearSelect.value);
+                const ty = parseInt(toYearSelect.value);
+
+                if (fy === ty) {
+                    alert('가져올 년도와 대상 년도가 같습니다.');
+                    return;
+                }
+
+                if(!confirm(`${fy}학년도 부서 정보를 ${ty}학년도로 가져오시겠습니까?\n\n※ 이미 등록된 부서는 정보가 업데이트되고, 없는 부서는 새로 추가됩니다.`)) return;
+
+                btnSubmit.disabled = true;
+                btnSubmit.innerHTML = '가져오는 중...';
+                
+                try {
+                    const result = await this.handleDeptImport(fy, ty);
+                    if(result.success) {
+                        alert(`부서 정보를 성공적으로 가져왔습니다. (데이터: ${result.count}건)`);
+                        // Refresh current view if target year matches
+                        const currentAdminYear = parseInt(document.getElementById('setting-academic-year')?.value);
+                        if(currentAdminYear === ty) {
+                             if(this.refreshAdminView) this.refreshAdminView(ty);
+                        }
+                        closeModal();
+                    } else {
+                        throw new Error(result.error || '알 수 없는 오류');
+                    }
+                } catch(err) {
+                    console.error("Import failed", err);
+                    statusArea.textContent = '가져오기 실패: ' + err.message;
+                    statusArea.classList.remove('hidden');
+                    btnSubmit.disabled = false;
+                    btnSubmit.innerHTML = '<span class="material-symbols-outlined text-sm">check_circle</span> 확인';
+                }
+            };
+        }
+    },
+
+    handleDeptImport: async function(fromYear, toYear) {
+         try {
+             // 1. Fetch Source
+             const { data: sourceDepts, error: fetchErr } = await window.SupabaseClient.supabase
+                 .from('departments')
+                 .select('*')
+                 .eq('academic_year', fromYear);
+             
+             if(fetchErr) throw fetchErr;
+             if(!sourceDepts || sourceDepts.length === 0) {
+                 throw new Error(`${fromYear}학년도에는 등록된 부서 정보가 없습니다.`);
+             }
+
+             // 2. Fetch Target (to check for existing IDs/names)
+             const { data: targetDepts, error: targetErr } = await window.SupabaseClient.supabase
+                 .from('departments')
+                 .select('id, dept_name')
+                 .eq('academic_year', toYear);
+             
+             if(targetErr) throw targetErr;
+
+             // Map target depts by name for quick lookup
+             const targetMap = (targetDepts || []).reduce((acc, d) => {
+                 acc[d.dept_name] = d.id;
+                 return acc;
+             }, {});
+
+             // 3. Prep Payloads (Strict Separation)
+             const toUpdate = [];
+             const toInsert = [];
+
+             sourceDepts.forEach(d => {
+                 const row = {
+                     academic_year: toYear,
+                     dept_name: d.dept_name,
+                     dept_short: d.dept_short,
+                     dept_color: d.dept_color,
+                     sort_order: d.sort_order,
+                     is_active: d.is_active,
+                     is_printable: d.is_printable !== undefined ? d.is_printable : true
+                 };
+
+                 // Check if it exists ONLY in the target year
+                 if (targetMap[d.dept_name]) {
+                     // Use target's existing ID to perform an update
+                     // NEVER use d.id (from source year)
+                     row.id = targetMap[d.dept_name];
+                     toUpdate.push(row);
+                 } else {
+                     // No match in target -> Fresh INSERT
+                     toInsert.push(row);
+                 }
+             });
+
+             // 4. Execute (Strictly separate to prevent cross-year ID pollution)
+             if (toUpdate.length > 0) {
+                 const { error: updErr } = await window.SupabaseClient.supabase
+                     .from('departments')
+                     .upsert(toUpdate, { onConflict: 'id' });
+                 if (updErr) throw updErr;
+             }
+
+             if (toInsert.length > 0) {
+                 const { error: insErr } = await window.SupabaseClient.supabase
+                     .from('departments')
+                     .insert(toInsert);
+                 if (insErr) throw insErr;
+             }
+             
+             return { success: true, count: sourceDepts.length };
+         } catch(e) {
+             return { success: false, error: e.message };
+         }
     },
 
 
