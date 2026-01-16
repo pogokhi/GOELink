@@ -63,7 +63,7 @@ body {
 
 /* Hide the default events container to let custom content fill the height */
 .fc-daygrid-day-events {
-    display: none !important;
+    min-height: 30px !important;
 }
 
 /* Ensure the main top container fills the frame */

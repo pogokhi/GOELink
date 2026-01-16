@@ -1113,7 +1113,7 @@ const App = {
                 const type = isEligibleForSub(name);
                 if (!type) return;
 
-                const d = new Date(dateStr);
+                const d = this.parseLocal(dateStr);
                 const dayNum = d.getDay(); // 0:Sun, 6:Sat
                 let needsSub = false;
 
@@ -1127,7 +1127,7 @@ const App = {
                 if (needsSub) {
                     let subDate = this.adjustSolarDate(dateStr, 1);
                     while (true) {
-                        const sd = new Date(subDate);
+                        const sd = this.parseLocal(subDate);
                         const sNum = sd.getDay();
                         // Next non-weekend and non-existing holiday
                         if (sNum !== 0 && sNum !== 6 && !results[subDate] && !substitutes[subDate]) {
@@ -1945,6 +1945,17 @@ const App = {
 
         // 3. Search Initialization
         this.bindCalendarSearch();
+
+        // 5. Button Bindings (Header)
+        const btnAdd = document.getElementById('btn-add-schedule');
+        if (btnAdd) {
+            btnAdd.onclick = () => this.openScheduleModal();
+        }
+
+        const btnPrint = document.getElementById('btn-print-modal');
+        if (btnPrint) {
+            btnPrint.onclick = () => this.openPrintModal();
+        }
     },
 
     // --- Data Fetching ---
@@ -2027,7 +2038,25 @@ const App = {
 
         // basicSchedules is array of { type, code, name, start_date, end_date, is_holiday, academic_year }
         if (basicSchedules && Array.isArray(basicSchedules)) {
-            
+            // A-0. Collect all holiday dates first to use for exam filtering
+            const holidayDates = new Set();
+            basicSchedules.forEach(item => {
+                if (item.is_holiday || item.type === 'holiday') {
+                    if (item.start_date === item.end_date || !item.end_date) {
+                        holidayDates.add(item.start_date);
+                    } else {
+                        let curr = this.parseLocal(item.start_date);
+                        const last = this.parseLocal(item.end_date);
+                        let l = 0;
+                        while(curr <= last && l < 366) {
+                            holidayDates.add(this.formatLocal(curr));
+                            curr.setDate(curr.getDate() + 1);
+                            l++;
+                        }
+                    }
+                }
+            });
+
             basicSchedules.forEach(item => {
                 // --- 1.5 Academic Year Consistency Check ---
                 // Basic schedules must fall within their academic year (Mar 1 to Feb 29 of next year)
@@ -2051,7 +2080,7 @@ const App = {
                 } else if (item.type === 'vacation') {
                      className = 'vacation-bg-event';
                 } else if (item.type === 'term') {
-                     className = 'holiday-bg-event'; 
+                     className = 'event-term-text'; 
                 } else if (item.type === 'holiday') {
                      className = 'holiday-bg-event';
                 } else if (item.type === 'exam') {
@@ -2066,32 +2095,52 @@ const App = {
 
                 // Add to Reference Map
                 if (item.start_date === item.end_date || !item.end_date) {
+                    // Filter: Skip exams on weekends/holidays
+                    if (isExam) {
+                        const d = this.parseLocal(item.start_date);
+                        const day = d.getDay();
+                        if (day === 0 || day === 6 || holidayDates.has(item.start_date)) {
+                            return; // Don't show exam info on non-school days
+                        }
+                    }
+
                     addAdminRef(item.start_date, item.name);
                     events.push({
                         start: item.start_date,
                         display: 'background',
                         title: '', 
                         className: className,
-                        backgroundColor: bgColor || undefined,
+                        backgroundColor: 'transparent', // Always transparent for FC, painted manually in renderer
                         allDay: true,
                         extendedProps: { label: item.name }
                     });
                 } else {
                     // Range Event (Exams, Multi-day Events)
                     // We need to add refs for every day
-                    let current = new Date(item.start_date);
-                    const endDate = new Date(item.end_date);
+                    let current = this.parseLocal(item.start_date);
+                    const endDate = this.parseLocal(item.end_date);
                     let loop = 0;
                     
                     while (current <= endDate && loop < 365) {
                         const dStr = this.formatLocal(current);
+                        
+                        // Filter: Skip exams on weekends/holidays
+                        if (isExam) {
+                            const day = current.getDay();
+                            if (day === 0 || day === 6 || holidayDates.has(dStr)) {
+                                current.setDate(current.getDate() + 1);
+                                loop++;
+                                continue;
+                            }
+                        }
+
                         addAdminRef(dStr, item.name);
                         events.push({
                             start: dStr,
                             display: 'background',
                             title: '', 
                             className: className,
-                            backgroundColor: bgColor || (item.type === 'term' ? 'transparent' : undefined), // Terms are just markers
+                            backgroundColor: 'transparent', // Always transparent for FC, painted manually in renderer
                             allDay: true,
                             extendedProps: { label: item.name }
                         });
@@ -2229,6 +2278,8 @@ const App = {
         const visSelect = document.getElementById('sched-visibility');
         const descInput = document.getElementById('sched-desc');
         const printCheck = document.getElementById('sched-printable');
+        const includeHolidaysCheck = document.getElementById('sched-include-holidays');
+        const includeHolidaysWrapper = document.getElementById('include-holidays-wrapper');
         const btnDelete = document.getElementById('btn-delete');
         const visHint = document.getElementById('visibility-hint');
 
@@ -2249,6 +2300,7 @@ const App = {
             document.getElementById('modal-title').textContent = '일정 수정';
             btnDelete.classList.remove('hidden');
             recurSection.classList.add('hidden'); // Hide recurrence on edit for simplicity in V1
+            includeHolidaysWrapper.classList.add('hidden'); // Hide include holidays on edit
 
             const event = this.state.calendar.getEventById(eventId);
             if (event) {
@@ -2267,9 +2319,23 @@ const App = {
                 visSelect.value = event.extendedProps.visibility;
                 descInput.value = event.extendedProps.description || '';
                 printCheck.checked = event.extendedProps.isPrintable !== false;
+                includeHolidaysCheck.checked = event.extendedProps.weekend === 'on';
             }
         } else {
             recurSection.classList.remove('hidden');
+            
+            // Check if defaultDate is a holiday or weekend
+            const data = this.state.calendarData || { redDayMap: {} };
+            const isHoliday = defaultDate && data.redDayMap && data.redDayMap[defaultDate];
+            const isWeekend = defaultDate && ([0, 6].includes(new Date(defaultDate).getDay()));
+            
+            if (isHoliday || isWeekend) {
+                includeHolidaysWrapper.classList.add('hidden');
+            } else {
+                includeHolidaysWrapper.classList.remove('hidden');
+            }
+            
+            includeHolidaysCheck.checked = false; // Default: unchecked
             if (defaultDate) {
                 startInput.value = defaultDate;
                 endInput.value = defaultDate;
@@ -2291,9 +2357,9 @@ const App = {
                 recurOptions.classList.remove('hidden');
                 if (!rUntil.value) {
                     // Default until: 1 month later
-                    const d = new Date(startInput.value);
+                    const d = this.parseLocal(startInput.value);
                     d.setMonth(d.getMonth() + 1);
-                    rUntil.value = d.toISOString().split('T')[0];
+                    rUntil.value = this.formatLocal(d);
                 }
             } else {
                 recurOptions.classList.add('hidden');
@@ -2337,6 +2403,7 @@ const App = {
                 visibility: visSelect.value,
                 description: descInput.value,
                 is_printable: printCheck.checked,
+                weekend: includeHolidaysCheck.checked ? 'on' : null,
                 author_id: this.state.user.id
             };
 
@@ -2582,7 +2649,7 @@ const App = {
         document.getElementById('btn-download-template').onclick = () => {
             const wb = XLSX.utils.book_new();
             const ws_data = [
-                ['구분(기본/휴일/일반)', '부서명(일반인 경우)', '일정명', '시작일(YYYY-MM-DD)', '종료일(YYYY-MM-DD)', '내용', '공개범위(전체/교직원/부서)'],
+                ['구분(기본/휴일/일반)', '부서명(일반인 경우)', '일정명', '시작일(YYYY-MM-DD)', '종료일(YYYY-MM-DD)', '내용', '공개범위(전체/교직원/부서)', '주말포함(on)'],
                 // 학기/방학 행사
                 ['기본', '', '여름방학', '2026-07-22', '2026-08-12', '', '전체'],
                 ['기본', '', '겨울방학', '2026-01-07', '', '', '전체'],
@@ -2689,6 +2756,7 @@ const App = {
                     let end = parseDate(row[4]);
                     const desc = (row[5] || '').toString().trim();
                     const visibilityRaw = (row[6] || '').toString().trim();
+                    const weekendRaw = (row[7] || '').toString().trim().toLowerCase(); // Column index 7
 
                     if (!title || !start) {
                          // Only skip if completely empty
@@ -2759,7 +2827,8 @@ const App = {
                             dept_id: finalDept.id,
                             visibility,
                             author_id: this.state.user.id,
-                            is_printable: true
+                            is_printable: true,
+                            weekend: weekendRaw === 'on' ? 'on' : null
                         });
                         excelCount++;
                     } else {
@@ -2857,7 +2926,7 @@ const App = {
                 // 5. Spring Sem Start (If missing, detected by Winter end)
                 if (winterVac && !hasCode('SPRING_SEM_START')) {
                     const nextSchoolDay = findNextSchoolDay(winterVac.end_date);
-                    const nDate = new Date(nextSchoolDay);
+                    const nDate = this.parseLocal(nextSchoolDay);
                     if (nDate.getMonth() !== 2) { 
                         parsedBasic.push({
                             academic_year: year,
@@ -3062,7 +3131,7 @@ const App = {
             if (e.display === 'background' || e.display === 'block') {
                 if (e.display === 'background') data.backgroundEvents.push(e);
                 
-                if (e.className.includes('holiday-bg-event') || e.className.includes('event-major-text') || e.className.includes('event-env-text') || e.className.includes('event-exam-text')) {
+                if (e.className.includes('holiday-bg-event') || e.className.includes('event-major-text') || e.className.includes('event-env-text') || e.className.includes('event-exam-text') || e.className.includes('event-term-text')) {
                      if (!data.holidayMap[dateKey]) data.holidayMap[dateKey] = [];
                      const label = e.extendedProps?.label || e.title;
                      if (label && !data.holidayMap[dateKey].includes(label)) data.holidayMap[dateKey].push(label);
@@ -3083,12 +3152,31 @@ const App = {
                     data.bgColorMap[dateKey] = '#fffcfc';
                 }
             } else {
-                let current = new Date(e.start);
-                const endEv = e.end ? new Date(e.end) : new Date(e.start);
+                let current = this.parseLocal(e.start);
+                const endEv = e.end ? this.parseLocal(e.end) : this.parseLocal(e.start);
                 let daysCount = 0;
                 while (current <= endEv) {
                     if (daysCount > 365) break; 
                     const dKey = this.formatLocal(current);
+                    
+                    // --- Weekend/Holiday Visibility Check ---
+                    const day = current.getDay();
+                    const isWeekend = day === 0 || day === 6;
+                    const isHoliday = data.redDayMap && data.redDayMap[dKey];
+                    const showOnWeekend = e.extendedProps?.weekend === 'on';
+
+                    // If it's a holiday/weekend AND not explicitly 'showOnWeekend', skip rendering this day
+                    if ((isWeekend || isHoliday) && !showOnWeekend) {
+                        // Special case: If it's a single-day entry (start === end) and the user explicitly clicked it, we show it (standard FC behavior)
+                        // But range entries (startDate !== endDate) should respect the rule.
+                        const isRangeEntry = e.start !== (e.end || e.start);
+                        if (isRangeEntry) {
+                            current.setDate(current.getDate() + 1);
+                            daysCount++;
+                            continue;
+                        }
+                    }
+
                     if (!data.scheduleMap[dKey]) data.scheduleMap[dKey] = {};
                     const deptId = e.extendedProps.deptId || 'uncategorized';
                     if (!data.scheduleMap[dKey][deptId]) {
@@ -3117,6 +3205,14 @@ const App = {
         const container = document.createElement('div');
         container.className = "flex flex-col w-full justify-start items-stretch flex-grow";
         container.style.height = "100%"; // Explicitly set height for sticky track
+        
+        // MASKING: Ensure the whole cell is opaque white (or today color) to hide FullCalendar background events
+        // This reinforces the "color restricted to header" rule.
+        if (arg.isToday) {
+            container.style.backgroundColor = 'var(--fc-today-bg-color)';
+        } else {
+            container.style.backgroundColor = '#ffffff';
+        }
 
         // Group header and divider to apply background color up to the divider line
         const headerGroup = document.createElement('div');
