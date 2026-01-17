@@ -45,6 +45,37 @@ html {
         display: flex; /* Ensure FC fills it */
         flex-direction: column;
     }
+
+    /* Force FullCalendar to use internal scroller by pinning height */
+    .fc {
+        height: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+
+    /* Ensure the view harness takes up the remaining space */
+    .fc-view-harness {
+        flex-grow: 1 !important;
+        height: 100% !important;
+        min-height: 0 !important;
+    }
+
+    /* Target the grid scroller specifically to keep header fixed */
+    .fc .fc-scroller-harness {
+        flex-grow: 1 !important;
+        height: 100% !important;
+        min-height: 0 !important;
+    }
+
+    .fc .fc-scroller {
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+    }
+
+    /* Prevent the column header (weekdays) from scrolling */
+    .fc .fc-col-header-harness {
+        flex-shrink: 0 !important;
+    }
 }
 
 /* Calendar Overrides */
@@ -125,8 +156,9 @@ html {
 }
 
 /* Calendar Header Styling */
+.fc-scrollgrid-section-header,
 .fc-col-header-cell {
-    background-color: #ede9fe; /* purple-100 */
+    background-color: #ede9fe !important; /* purple-100 */
     padding: 8px 0 !important;
 }
 
@@ -142,11 +174,7 @@ html {
     font-weight: 700;
 }
 
-/* Day Header (Mon, Tue, etc.) Styling */
-.fc-col-header-cell {
-    background-color: #ede9fe !important; /* purple-100 */
-    padding: 8px 0 !important;
-}
+
 
 /* Ensure the calendar toolbar doesn't scroll */
 .fc-header-toolbar {
