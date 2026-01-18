@@ -2440,6 +2440,58 @@ const App = {
             };
         }
 
+        // --- Dropdown Navigation ---
+        const selYear = document.getElementById('list-nav-year');
+        const selMonth = document.getElementById('list-nav-month');
+        
+        if (selYear && selMonth) {
+            // Populate Year (Current +/- 2)
+            const currYear = new Date().getFullYear();
+            selYear.innerHTML = '';
+            for (let y = currYear - 2; y <= currYear + 2; y++) {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = `${y}년`;
+                selYear.appendChild(opt);
+            }
+
+            // Populate Month
+            selMonth.innerHTML = '';
+            for (let m = 1; m <= 12; m++) {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = `${m}월`;
+                selMonth.appendChild(opt);
+            }
+
+            // Bind Events
+            // Year: Move to Jan 1st of selected year
+            selYear.onchange = () => {
+                const y = parseInt(selYear.value);
+                // 1st week of Jan
+                const d = new Date(y, 0, 1);
+                const day = d.getDay();
+                const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+                this.state.listViewStart = new Date(d.setDate(diff));
+                
+                // Reset month to Jan
+                selMonth.value = 1;
+                this.renderListView();
+            };
+
+            // Month: Move to 1st week of selected month in current year
+            selMonth.onchange = () => {
+                const y = parseInt(selYear.value); // Use currently selected year
+                const m = parseInt(selMonth.value);
+                // 1st day of month
+                const d = new Date(y, m - 1, 1);
+                const day = d.getDay();
+                const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+                this.state.listViewStart = new Date(d.setDate(diff));
+                this.renderListView();
+            };
+        }
+
         // 1-Week / 2-Week Toggle
         const btn1Week = document.getElementById('btn-list-1week');
         const btn2Weeks = document.getElementById('btn-list-2weeks');
@@ -2496,20 +2548,77 @@ const App = {
         end.setDate(end.getDate() + (weeks * 7) - 1); // Sunday of last week
 
         // Update Range Display
+        // Update Range Display
         const fmt = (d) => `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
-        const rangeStr = `${fmt(start)} ~ ${fmt(end)}`;
+        let rangeStr = `${fmt(start)} ~ ${fmt(end)}`;
 
-        if (rangeDisplay) rangeDisplay.textContent = rangeStr;
-        if (printRangeDisplay) printRangeDisplay.textContent = rangeStr;
-        if (screenRangeDisplay) screenRangeDisplay.textContent = rangeStr;
+        // HOLIDAY INFO IN HEADER
+        // Filter holidays within range
+        const settings = await this.fetchSettings(); // Use cached or fresh
+        const basicSchedules = settings.basic_schedules || [];
+        
+        const holidayInfos = [];
+        // Helper to check range overlap for header
+        const checkOverlapHeader = (evStart, evEnd, rangeStart, rangeEnd) => {
+            return (evStart <= rangeEnd.toISOString().split('T')[0] && (evEnd || evStart) >= rangeStart.toISOString().split('T')[0]);
+        };
+
+        basicSchedules.forEach(b => {
+             if (b.is_holiday || b.type === 'holiday' || b.name.includes('재량휴업') || b.name.includes('대체공휴일')) {
+                 // Check if in range
+                 const bStart = b.start_date;
+                 const bEnd = b.end_date || b.start_date;
+                 // Simple string compare sufficient for ISO dates? Yes.
+                 // rangeStart/End are Dates. Convert to YYYY-MM-DD
+                 const rStartStr = start.toISOString().split('T')[0];
+                 const rEndStr = end.toISOString().split('T')[0];
+
+                 if (checkOverlapHeader(bStart, bEnd, start, end)) {
+                     // Get precise date for display (start date usually)
+                     // If range, maybe show range? User asked for "MM.DD: Name"
+                     // Let's use start date formatted M.D
+                     const hDate = new Date(bStart);
+                     const m = hDate.getMonth() + 1;
+                     const d = hDate.getDate();
+                     holidayInfos.push(`${m}.${d}: ${b.name}`);
+                 }
+             }
+        });
+
+        if (holidayInfos.length > 0) {
+            rangeStr += ` <span style="color:red; font-size:11px;">(${holidayInfos.join(', ')})</span>`;
+        }
+
+        if (rangeDisplay) rangeDisplay.innerHTML = rangeStr;
+        if (printRangeDisplay) printRangeDisplay.innerHTML = rangeStr;
+        if (screenRangeDisplay) screenRangeDisplay.innerHTML = rangeStr;
+
+        // Sync Dropdowns
+        const selYear = document.getElementById('list-nav-year');
+        const selMonth = document.getElementById('list-nav-month');
+        if (selYear && selMonth) {
+            // Check if year exists in options, if not add it (extended range handling)
+            // For now assume range is sufficient or just set if exists
+            const y = start.getFullYear();
+            const m = start.getMonth() + 1;
+            
+            // Auto expand year range if needed? For now simple set.
+            if (selYear.querySelector(`option[value="${y}"]`)) {
+                selYear.value = y;
+            } else {
+                 // Creating option on fly if out of range is nice but strict requirement was "Current +/- 2".
+                 // Let's just try to set it.
+                 selYear.value = y; 
+            }
+            selMonth.value = m;
+        }
 
         // 2. Fetch Data for Range
-        // We use the same generic fetch but filtering is done in memory for now as we don't have range query in fetchSchedules yet
         // Optimization: Create range fetch or just use all (cache?)
         // For now, fetch all.
         const schedules = await this.fetchSchedules();
-        const settings = await this.fetchSettings(); // For holidays
-        const basicSchedules = settings.basic_schedules || [];
+        // settings and basicSchedules already fetched above for header
+        
         const departments = this.state.departments || [];
 
         // 3. Process Data

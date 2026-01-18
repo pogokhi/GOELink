@@ -4,13 +4,21 @@
         <div class="flex items-center gap-4">
             <h2 class="text-lg font-bold text-gray-800" id="list-view-title">주간 계획서</h2>
             <div class="flex items-center gap-2">
-                <button id="btn-list-prev" class="p-1 hover:bg-gray-100 rounded-full transition">
-                    <span class="material-symbols-outlined text-gray-600">chevron_left</span>
+                <button id="btn-list-prev" class="p-1 hover:bg-gray-100 rounded text-gray-600 transition flex justify-center items-center">
+                    <span class="material-symbols-outlined">chevron_left</span>
                 </button>
                 <button id="btn-list-today" class="px-3 py-1 text-sm border rounded hover:bg-gray-50 transition">오늘</button>
-                <button id="btn-list-next" class="p-1 hover:bg-gray-100 rounded-full transition">
-                    <span class="material-symbols-outlined text-gray-600">chevron_right</span>
+                <button id="btn-list-next" class="p-1 hover:bg-gray-100 rounded text-gray-600 transition flex justify-center items-center">
+                    <span class="material-symbols-outlined">chevron_right</span>
                 </button>
+                
+                <!-- Navigation Dropdowns -->
+                <select id="list-nav-year" class="ml-2 border rounded px-2 py-1 text-sm bg-white focus:ring-2 focus:ring-purple-500 outline-none">
+                    <!-- JS populated -->
+                </select>
+                <select id="list-nav-month" class="border rounded px-2 py-1 text-sm bg-white focus:ring-2 focus:ring-purple-500 outline-none">
+                    <!-- JS populated -->
+                </select>
             </div>
             <div id="list-date-range" class="text-sm font-medium text-gray-600"></div>
             <div class="flex bg-gray-100 rounded p-0.5 ml-2">
