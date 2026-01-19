@@ -1,0 +1,106 @@
+/* 
+  PogokLink Mobile-Specific Styles 
+  Only active for screens <= 1024px or touch devices.
+*/
+
+/* 1. Hide Print Feature on Mobile/Tablet */
+/* Detect touch devices (Smartphones/Tablets) or small screens */
+@media screen and (max-width: 1024px), (pointer: coarse) {
+    #btn-print-modal, 
+    #btn-print-direct, 
+    .no-mobile-print,
+    .btn-print {
+        display: none !important;
+    }
+}
+
+@media screen and (max-width: 768px) {
+    /* 2. Global Layout Adjustments */
+    #main-content {
+        padding: 8px 4px !important; /* Narrower padding for small screens */
+    }
+
+    /* 3. Dept List View Optimization */
+    #dept-view-content-wrapper {
+        border-radius: 4px !important;
+        overflow-x: auto !important; /* Allow horizontal scroll */
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #dept-view-table {
+        min-width: 800px; /* Ensure table doesn't collapse too much */
+    }
+
+    /* Sticky First Column (Date) */
+    #dept-view-table thead th:first-child,
+    #dept-view-table tbody td:first-child {
+        position: sticky !important;
+        left: 0 !important;
+        z-index: 10 !important;
+        background-color: #f9fafb !important; /* Match table background */
+        box-shadow: 2px 0 5px rgba(0,0,0,0.05); /* Subtle shadow to indicate scroll */
+    }
+
+    #dept-view-table thead th:first-child {
+        z-index: 20 !important; /* Stay above body sticky cells */
+    }
+
+    /* 4. FullCalendar Mobile Adjustments */
+    .fc-toolbar {
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+
+    .fc-toolbar-title {
+        font-size: 1.1rem !important;
+    }
+
+    .fc .fc-toolbar-chunk {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    /* Smaller fonts for calendar grid on mobile */
+    .fc-col-header-cell-cushion {
+        font-size: 0.8rem !important;
+    }
+
+    .fc-daygrid-day-number {
+        font-size: 0.8rem !important;
+    }
+
+    /* 5. Modal & Admin Form Adjustments (Grid to Stack) */
+    .grid-cols-2, .grid-cols-3, .grid-cols-4, .grid-cols-12 {
+        grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+    }
+
+    /* Specific overrides for admin page items that should remain compact */
+    .flex-row.md\:flex-row {
+        flex-direction: column !important;
+    }
+
+    .md\:col-span-3, .md\:col-span-6, .md\:col-span-12 {
+        grid-column: span 1 / span 1 !important;
+    }
+
+    /* 6. Header / Navbar */
+    #main-header .max-w-7xl {
+        height: auto !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+
+    #auth-status {
+        width: 100%;
+        justify-content: center;
+    }
+
+    /* Make buttons full width on small screens if needed */
+    .modal-footer button {
+        flex-grow: 1;
+    }
+}

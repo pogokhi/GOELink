@@ -120,12 +120,13 @@ const App = {
             });
 
             // 4. Load Initial View
-            const savedView = localStorage.getItem('pogok_last_view') || 'calendar';
-            let initialView = savedView;
+            // Force 'calendar' on root load (ignore localStorage to prevent auto-redirect to dept_list etc for guests)
+            let initialView = 'calendar'; 
 
             if (window.location.hash) {
                 const hashView = window.location.hash.substring(1);
-                if (['calendar', 'login', 'admin'].includes(hashView)) {
+                // Allow dept_list explicitly in hash handling
+                if (['calendar', 'login', 'admin', 'dept_list'].includes(hashView)) {
                     initialView = hashView;
                 }
             }
@@ -2942,8 +2943,13 @@ const App = {
             
             let rowClass = '';
             if (dayNum === 0) rowClass = 'row-sunday';
+            else if (dayNum === 1) rowClass = 'row-monday'; // Assign Monday class
             else if (dayNum === 6) rowClass = 'row-saturday';
-            if (holidayName) rowClass = 'row-holiday';
+            
+            // Append holiday class instead of overwriting, using space separator
+            if (holidayName) {
+                rowClass = rowClass ? `${rowClass} row-holiday` : 'row-holiday';
+            }
 
             bodyHtml += `<tr class="${rowClass}">`;
             bodyHtml += `<td class="col-date">${d}<br><span class="text-[10px]">${dayNames[dayNum]}</span></td>`;

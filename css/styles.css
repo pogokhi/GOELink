@@ -967,9 +967,39 @@ html {
 /* Special Days */
 #dept-view-table tr.row-sunday { background-color: #fef2f2; }
 #dept-view-table tr.row-saturday { background-color: #eff6ff; }
-#dept-view-table tr.row-holiday { background-color: #fff1f2; }
+/* Final Solution: Gradient Background Divider (Bypasses border collapse & z-index issues) */
+/* Sunday: Draw 1px black line at the BOTTOM using background gradient */
+#dept-view-table tr.row-sunday td,
+#dept-view-table tr.row-sunday th,
+#dept-view-table tr.row-sunday .col-date {
+    background-image: linear-gradient(to top, #000000 1px, transparent 1px) !important;
+    background-size: 100% 100% !important;
+    background-repeat: no-repeat !important;
+    border-bottom: none !important; /* Visual cleanup */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+}
 
-#dept-view-table tr.row-sunday .col-date { color: #ef4444; background-color: #fef2f2; }
+/* Monday: Draw 1px black line at the TOP using background gradient */
+#dept-view-table tr.row-monday td,
+#dept-view-table tr.row-monday th,
+#dept-view-table tr.row-monday .col-date,
+#dept-view-table tr.row-sunday + tr td,
+#dept-view-table tr.row-sunday + tr th,
+#dept-view-table tr.row-sunday + tr .col-date {
+    background-image: linear-gradient(to bottom, #000000 1px, transparent 1px) !important;
+    background-size: 100% 100% !important;
+    background-repeat: no-repeat !important;
+    border-top: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+}
+
+#dept-view-table tr.row-sunday .col-date { 
+    color: #ef4444; 
+    background-color: #fef2f2; 
+}
+/* No need to re-declare background/borders for .col-date as they are included above */
 #dept-view-table tr.row-saturday .col-date { color: #3b82f6; background-color: #eff6ff; }
 #dept-view-table tr.row-holiday .col-date { color: #e11d48; background-color: #fff1f2; }
 
