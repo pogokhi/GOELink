@@ -1133,7 +1133,7 @@ html {
     }
 
     .dept-event-item {
-        font-size: 10pt !important; /* Restore schedule item font size */
+        font-size: 7pt !important;
     }
 
     /* Remove ANY parent styling that could double up borders */

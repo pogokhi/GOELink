@@ -1634,8 +1634,8 @@ const App = {
 
             const settingsPayload = {
                 academic_year: academicYear,
-                school_name: displayName,
-                full_name_kr: schoolNameKR || null, // Allow NULL if empty
+                school_name: schoolNameKR, // FIX: Store pure name only to prevent "Name (EN) (EN)" loop
+                full_name_kr: schoolNameKR ? (schoolNameKR + getVal('setting-school-level-kr')) : null,
                 name_en: schoolNameEN || null,
                 level_kr: getVal('setting-school-level-kr'),
                 level_en: getVal('setting-school-level-en')
@@ -2134,7 +2134,7 @@ const App = {
                     }
                 },
                 customList: {
-                    text: '목록',
+                    text: '주간',
                     click: () => {
                         this.navigate('list');
                     }
@@ -2563,7 +2563,52 @@ const App = {
 
         // Update Range Display
         const fmt = (d) => `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
-        const settings = await this.fetchSettings(); 
+        // [MOVED UP & FIXED] Sync Dropdowns with Hysteresis
+        const selYear = document.getElementById('list-nav-year');
+        const selMonth = document.getElementById('list-nav-month');
+        
+        let currentViewYear = start.getFullYear();
+        let currentViewMonth = start.getMonth() + 1; // 1-indexed
+
+        if (selYear && selMonth) {
+            // Priority 1: Respect User's Current Selection if it matches ANY visible day
+            // This enables viewing either 'Feb' (Old Year) or 'Mar' (New Year) for boundary weeks (e.g., Feb 24 - Mar 2).
+            const currSelY = parseInt(selYear.value);
+            const currSelM = parseInt(selMonth.value);
+            
+            let isSelectionValid = false;
+            // Iterate through visible days (max 14 days)
+            const checkEnd = new Date(end);
+            let dIter = new Date(start);
+            while(dIter <= checkEnd) {
+                if (dIter.getFullYear() === currSelY && (dIter.getMonth() + 1) === currSelM) {
+                    isSelectionValid = true;
+                    break;
+                }
+                dIter.setDate(dIter.getDate() + 1);
+            }
+
+            if (isSelectionValid) {
+                // Keep current selection (Hysteresis)
+                currentViewYear = currSelY;
+                currentViewMonth = currSelM;
+            } else {
+                // Priority 2: Auto-switch to Representative Day (Thursday)
+                const targetDate = new Date(start);
+                targetDate.setDate(targetDate.getDate() + 3); 
+                currentViewYear = targetDate.getFullYear();
+                currentViewMonth = targetDate.getMonth() + 1;
+            }
+
+            // Sync UI
+            if (selYear.querySelector(`option[value="${currentViewYear}"]`)) selYear.value = currentViewYear;
+            else selYear.value = currentViewYear;
+            selMonth.value = currentViewMonth;
+        }
+
+        // [FIX] Determine Academic Year based on SYNCED DROPDOWN VALUE
+        const targetAcademicYear = (currentViewMonth < 3) ? (currentViewYear - 1) : currentViewYear;
+        const settings = await this.fetchSettings(targetAcademicYear); 
         const basicSchedules = settings.basic_schedules || [];
         const sName = settings.full_name_kr || settings.school_name || "학교명 미설정";
 
@@ -2626,18 +2671,7 @@ const App = {
             rangeDisplay.innerHTML = `${fmt(start)} ~ ${fmt(end)}` + getHolidayString(start, end);
         }
 
-        // Sync Dropdowns
-        const selYear = document.getElementById('list-nav-year');
-        const selMonth = document.getElementById('list-nav-month');
-        if (selYear && selMonth) {
-            const targetDate = new Date(start);
-            targetDate.setDate(targetDate.getDate() + 6); // Sunday
-            const y = targetDate.getFullYear();
-            const m = targetDate.getMonth() + 1;
-            if (selYear.querySelector(`option[value="${y}"]`)) selYear.value = y;
-            else selYear.value = y;
-            selMonth.value = m;
-        }
+
 
         // 2. Fetch Data
         const schedules = await this.fetchSchedules();
@@ -2955,7 +2989,34 @@ const App = {
             bodyHtml += `<tr class="${rowClass}">`;
             bodyHtml += `<td class="col-date">${d}<br><span class="text-[10px]">${dayNames[dayNum]}</span></td>`;
             activeDepts.forEach(dept => {
-                const deptSchedules = (schedules || []).filter(s => s.dept_id === dept.id && s.start_date === dateStr);
+                // 1. Get DB Schedules (Clone to allow injection)
+                let deptSchedules = (schedules || []).filter(s => s.dept_id === dept.id && s.start_date === dateStr);
+                // Create a mutable copy if filter returns a new array anyway, but let's be explicit we treat it as mutable list
+                deptSchedules = [...deptSchedules];
+
+                // 2. Inject Virtual Events
+                // Kyomu -> Holidays
+                if (dept.dept_short === '교무' && holidayName) {
+                    // Check duplicate to avoid double showing if manually added
+                    if (!deptSchedules.some(s => s.title === holidayName)) {
+                        deptSchedules.push({ title: holidayName, description: '' });
+                    }
+                }
+
+                // Science -> Env Events
+                if (dept.dept_short === '과학') {
+                    const mm = String(curr.getMonth() + 1).padStart(2, '0');
+                    const dd = String(curr.getDate()).padStart(2, '0');
+                    const envKey = `${mm}-${dd}`;
+                    const envEvent = this.FIXED_ENV_EVENTS[envKey];
+                    
+                    if (envEvent) {
+                         if (!deptSchedules.some(s => s.title === envEvent)) {
+                            deptSchedules.push({ title: envEvent, description: '' });
+                        }
+                    }
+                }
+
                 bodyHtml += `<td class="col-dept">`;
                 deptSchedules.forEach(s => {
                     const desc = s.description ? ` (${s.description})` : '';
@@ -3630,13 +3691,14 @@ const App = {
 
                     monthSel.innerHTML = '';
                     for (let m = -2; m <= 6; m++) {
-                        const d = new Date(now.getFullYear(), now.getMonth() + m, 1);
+                        // Generate relative to VIEWED DATE, not NOW
+                        const d = new Date(vY, vM + m, 1);
                         const opt = document.createElement('option');
                         opt.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                         opt.textContent = `${d.getFullYear()}년 ${d.getMonth() + 1}월`;
                         
-                        // Set default to currently viewed month
-                        if (d.getFullYear() === vY && d.getMonth() === vM) {
+                        // Set default to currently viewed month (m=0 is the current view)
+                        if (m === 0) {
                             opt.selected = true;
                         }
                         monthSel.appendChild(opt);
