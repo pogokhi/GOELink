@@ -307,6 +307,14 @@ const App = {
         // Cleanup content
         container.innerHTML = '';
 
+        // Mobile Calendar Button Layout Hook
+        // Adds a class to body so CSS can adjust header button spacing dynamically
+        if (viewName === 'list' || viewName === 'dept_list') {
+            document.body.classList.add('view-has-calendar-btn');
+        } else {
+            document.body.classList.remove('view-has-calendar-btn');
+        }
+
         if (viewName === 'calendar') {
             try {
                 const response = await fetch('pages/calendar.html');
@@ -2634,7 +2642,7 @@ const App = {
         const generateHeaderHtml = (rStart, rEnd, isScreenOnly = false, isPrintOnly = false) => {
             const rangeBase = `${fmt(rStart)} ~ ${fmt(rEnd)}`;
             const holidays = getHolidayString(rStart, rEnd);
-            const rangeFull = rangeBase + holidays;
+            // rangeFull removed, we separate them now
             
             let html = '';
             // Print Header
@@ -2643,9 +2651,10 @@ const App = {
                     <div class="text-center mb-4 hidden print:block">
                         <h1 class="text-3xl font-bold border-b-2 border-black pb-4 mb-2">주간 계획서</h1>
                         <div class="flex justify-between items-end">
-                            <div class="text-[16px] font-bold">${rangeFull}</div>
+                            <div class="text-[16px] font-bold">${rangeBase}</div>
                             <div class="text-[16px] font-bold">${sName}</div>
                         </div>
+                        <div class="text-left mt-1 text-[11px] font-bold">${holidays}</div>
                     </div>
                 `;
             }
@@ -2655,9 +2664,10 @@ const App = {
                     <div class="text-center mb-8 print:hidden">
                         <h1 class="text-3xl font-bold border-b-2 border-gray-800 pb-4 mb-2">주간 계획서</h1>
                         <div class="flex justify-between items-end">
-                            <div class="text-[16px] font-bold text-gray-700">${rangeFull}</div>
+                            <div class="text-[16px] font-bold text-gray-700">${rangeBase}</div>
                             <div class="text-[16px] font-bold text-gray-700">${sName}</div>
                         </div>
+                        <div class="text-left mt-1 text-[11px] font-bold">${holidays}</div>
                     </div>
                 `;
             }
@@ -2666,7 +2676,7 @@ const App = {
 
         // Update Toolbar Range
         if (rangeDisplay) {
-            rangeDisplay.innerHTML = `${fmt(start)} ~ ${fmt(end)}` + getHolidayString(start, end);
+            rangeDisplay.innerHTML = `${fmt(start)} ~ ${fmt(end)}`; // Removed holiday text
         }
 
 
