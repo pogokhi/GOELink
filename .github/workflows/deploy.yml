@@ -8,7 +8,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.repository == 'pogokhi/goelink'
+    # Allow running on both main and mirror repos
+    if: github.repository == 'pogokhi/goelink' || github.repository == 'murmurgene/goelink'
     permissions:
       contents: write
     steps:
@@ -30,8 +31,10 @@ jobs:
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           token: ${{ secrets.DEPLOY_TOKEN }}
-          repository-name: pogokhi/pogokhi.github.io
-          branch: main # The branch where the static site is hosted
+          # Dynamically choose target repository
+          repository-name: ${{ github.repository == 'pogokhi/goelink' && 'pogokhi/pogokhi.github.io' || 'murmurgene/goelink' }}
+          # Dynamically choose target branch
+          branch: ${{ github.repository == 'pogokhi/goelink' && 'main' || 'gh-pages' }}
           folder: deploy_dist # Deploy the prepared directory
           clean: true
           single-commit: true
